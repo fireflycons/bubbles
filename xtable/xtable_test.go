@@ -1,6 +1,8 @@
 package xtable
 
 import (
+	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -141,7 +143,7 @@ func TestTableAlignment(t *testing.T) {
 				},
 			}),
 		)
-		got := ansi.Strip(biscuits.View())
+		got := dos2unix(ansi.Strip(biscuits.View()))
 		golden.RequireEqual(t, []byte(got))
 	})
 	t.Run("With border", func(t *testing.T) {
@@ -450,4 +452,13 @@ func TestFind(t *testing.T) {
 			require.Equal(t, biscuits.cursor, test.row)
 		})
 	}
+}
+
+func dos2unix(text string) string {
+	if runtime.GOOS != "windows" {
+		return text
+	}
+
+	ret := strings.ReplaceAll(text, "\n", "\r")
+	return ret
 }
