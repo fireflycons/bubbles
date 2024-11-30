@@ -323,9 +323,6 @@ func TestPad(t *testing.T) {
 }
 
 func TestSortBy(t *testing.T) {
-	// Some issue with golden tests and EOL characters on Windows.
-	// Oddly works locally on Windows, but not in GH actions
-	skipIfGithub(t)
 
 	thetable := New(
 		WithHeight(5),
@@ -339,7 +336,7 @@ func TestSortBy(t *testing.T) {
 				Data: []string{"abcdEfgh", "42", "0.72"},
 			},
 			{
-				Data: []string{"qwerTYui", "18", "4.35"},
+				Data: []string{"qwerTYui", "123", "4.35"},
 			},
 			{
 				Data: []string{"zxcvBNmj", "-4", "34.3"},
@@ -355,44 +352,134 @@ func TestSortBy(t *testing.T) {
 		col       int
 		direction SortOrder
 		hint      interface{}
+		expected  []Row
 	}{
 		{
 			name:      "col 0 asc",
 			col:       0,
 			direction: SortAscending,
 			hint:      SortString,
+			expected: []Row{
+				{
+					Data: []string{"abcdEfgh", "42", "0.72"},
+				},
+				{
+					Data: []string{"plmnPOiu", "4543534", "-23456.3"},
+				},
+				{
+					Data: []string{"qwerTYui", "123", "4.35"},
+				},
+				{
+					Data: []string{"zxcvBNmj", "-4", "34.3"},
+				},
+			},
 		},
 		{
 			name:      "col 0 desc",
 			col:       0,
 			direction: SortDescending,
 			hint:      SortString,
+			expected: []Row{
+				{
+					Data: []string{"zxcvBNmj", "-4", "34.3"},
+				},
+				{
+					Data: []string{"qwerTYui", "123", "4.35"},
+				},
+				{
+					Data: []string{"plmnPOiu", "4543534", "-23456.3"},
+				},
+				{
+					Data: []string{"abcdEfgh", "42", "0.72"},
+				},
+			},
 		},
 		{
 			name:      "col 1 asc",
 			col:       1,
 			direction: SortAscending,
 			hint:      SortNumeric,
+			expected: []Row{
+				{
+					Data: []string{"zxcvBNmj", "-4", "34.3"},
+				},
+				{
+					Data: []string{"abcdEfgh", "42", "0.72"},
+				},
+				{
+					Data: []string{"qwerTYui", "123", "4.35"},
+				},
+				{
+					Data: []string{"plmnPOiu", "4543534", "-23456.3"},
+				},
+			},
+		},
+		{
+			name:      "col 1 desc",
+			col:       1,
+			direction: SortDescending,
+			hint:      SortNumeric,
+			expected: []Row{
+				{
+					Data: []string{"plmnPOiu", "4543534", "-23456.3"},
+				},
+				{
+					Data: []string{"qwerTYui", "123", "4.35"},
+				},
+				{
+					Data: []string{"abcdEfgh", "42", "0.72"},
+				},
+				{
+					Data: []string{"zxcvBNmj", "-4", "34.3"},
+				},
+			},
 		},
 		{
 			name:      "col 2 asc",
 			col:       2,
 			direction: SortAscending,
 			hint:      SortNumeric,
+			expected: []Row{
+				{
+					Data: []string{"plmnPOiu", "4543534", "-23456.3"},
+				},
+				{
+					Data: []string{"abcdEfgh", "42", "0.72"},
+				},
+				{
+					Data: []string{"qwerTYui", "123", "4.35"},
+				},
+				{
+					Data: []string{"zxcvBNmj", "-4", "34.3"},
+				},
+			},
 		},
 		{
 			name:      "col 2 desc",
 			col:       2,
 			direction: SortDescending,
 			hint:      SortNumeric,
+			expected: []Row{
+				{
+					Data: []string{"zxcvBNmj", "-4", "34.3"},
+				},
+				{
+					Data: []string{"qwerTYui", "123", "4.35"},
+				},
+				{
+					Data: []string{"abcdEfgh", "42", "0.72"},
+				},
+				{
+					Data: []string{"plmnPOiu", "4543534", "-23456.3"},
+				},
+			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			thetable.SortBy(test.col, test.direction, test.hint)
-			got := ansi.Strip(thetable.View())
-			golden.RequireEqual(t, []byte(got))
+			require.Equal(t, test.expected, thetable.rows)
 		})
 
 	}
