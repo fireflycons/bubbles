@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - v*.*.*
+  workflow_call:
+    inputs:
+      go_version:
+        required: false
+        type: string
+        default: stable
+      upload_artifact:
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: goreleaser
@@ -11,19 +21,37 @@ concurrency:
 
 jobs:
   goreleaser:
-    uses: fireflycons/bubbles/.github/workflows/goreleaser.yml@main
-    secrets: {}
-    #   gh_pat: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-    #   docker_username: ${{ secrets.DOCKERHUB_USERNAME }}
-    #   docker_token: ${{ secrets.DOCKERHUB_TOKEN }}
-    #   goreleaser_key: ${{ secrets.GORELEASER_KEY }}
-    #   twitter_consumer_key: ${{ secrets.TWITTER_CONSUMER_KEY }}
-    #   twitter_consumer_secret: ${{ secrets.TWITTER_CONSUMER_SECRET }}
-    #   twitter_access_token: ${{ secrets.TWITTER_ACCESS_TOKEN }}
-    #   twitter_access_token_secret: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
-    #   mastodon_client_id: ${{ secrets.MASTODON_CLIENT_ID }}
-    #   mastodon_client_secret: ${{ secrets.MASTODON_CLIENT_SECRET }}
-    #   mastodon_access_token: ${{ secrets.MASTODON_ACCESS_TOKEN }}
-    #   discord_webhook_id: ${{ secrets.DISCORD_WEBHOOK_ID }}
-    #   discord_webhook_token: ${{ secrets.DISCORD_WEBHOOK_TOKEN }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    #   id-token: write
+    #   packages: write
+    env:
+      DOCKER_CLI_EXPERIMENTAL: enabled
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go_version }}
+          cache: true
+          check-latest: true
+      - uses: anchore/sbom-action/download-syft@v0.17.8
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.upload_artifact == true && always() }}
+        with:
+          retention-days: 30
+          name: dist
+          path: |
+            dist
+
 # yaml-language-server: $schema=https://json.schemastore.org/github-workflow.json
