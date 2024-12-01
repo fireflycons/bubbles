@@ -16,8 +16,8 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    # permissions:
-    #   contents: write
+    permissions:
+      contents: write
     #   id-token: write
     #   packages: write
     env:
@@ -36,8 +36,8 @@ jobs:
         with:
           version: latest
           args: release --clean
-        # env:
-        #   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         #   HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.gh_pat }}
         #   GORELEASER_KEY: ${{ secrets.goreleaser_key }}
         #   AUR_KEY: ${{ secrets.aur_key }}

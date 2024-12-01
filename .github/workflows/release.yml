@@ -13,9 +13,9 @@ jobs:
   goreleaser:
     uses: fireflycons/bubbles/.github/workflows/goreleaser.yml@main
     secrets: {}
+    #   gh_pat: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
     #   docker_username: ${{ secrets.DOCKERHUB_USERNAME }}
     #   docker_token: ${{ secrets.DOCKERHUB_TOKEN }}
-    #   gh_pat: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
     #   goreleaser_key: ${{ secrets.GORELEASER_KEY }}
     #   twitter_consumer_key: ${{ secrets.TWITTER_CONSUMER_KEY }}
     #   twitter_consumer_secret: ${{ secrets.TWITTER_CONSUMER_SECRET }}
