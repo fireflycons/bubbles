@@ -7,8 +7,10 @@ package xtable
 // -	Additional methods
 
 import (
+	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -20,6 +22,28 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
+
+// Metadata must be implemented by any metadata associated with a table row,
+// usually the source data associated with the row.
+type Metadata interface {
+
+	// GetHashCode returns a unique hash for the row metadata.
+	// It should remain constant for the lifetime of the table.
+	// You can use something that implements the Hash64 interface to generate this
+	GetHashCode() uint64
+}
+
+// Row represents one line in the table.
+type Row struct {
+	Data     []string
+	Metadata Metadata
+}
+
+// Column defines the table structure.
+type Column struct {
+	Title string
+	Width int
+}
 
 // Model defines a state for the table widget.
 type Model struct {
@@ -36,18 +60,6 @@ type Model struct {
 	viewport viewport.Model
 	start    int
 	end      int
-}
-
-// Row represents one line in the table.
-type Row struct {
-	Data     []string
-	Metadata interface{}
-}
-
-// Column defines the table structure.
-type Column struct {
-	Title string
-	Width int
 }
 
 // KeyMap defines keybindings. It satisfies to the help.KeyMap interface, which
@@ -181,6 +193,28 @@ func WithRows(rows []Row) Option {
 	}
 }
 
+// WithStructData creates a table by reflecting a slice of structs implementing the Metadata interface.
+//
+//   - Column names are derived from struct field names or if present, the value of struct tag "xtable".
+//   - Row data is converted to strings from the data in the slice.
+//   - Row Metadata field is set to the values in the slice.
+//   - All public struct fields are included, unless constrained by field names listed in `fields` argument.
+//
+// Panics if there is any error parsing the data from the slice, such as
+//   - data is not a slice of structs
+//   - slice element does not implement Metadata
+func WithStructData(data interface{}, fields ...string) Option {
+	return func(m *Model) {
+		if c, r, err := renderTable(data, fields); err != nil {
+			panic(fmt.Sprintf("Canmot render table: %s", err.Error()))
+		} else {
+			m.cols = c
+			m.rows = r
+		}
+	}
+}
+
+// WithRowNumbers insetrs a column at postion zero containing row numbers.
 func WithRowNumbers() Option {
 	return func(m *Model) {
 		m.rowNumbers = true
@@ -490,30 +524,56 @@ func (m Model) SelectedRowYOffset() int {
 }
 
 // RemoveSelectedRow removes the currently selected row. If no rows remain, this returns false.
-func (m Model) RemoveSelectedRow() (Model, bool) {
+func (m *Model) RemoveSelectedRow() bool {
+
+	return m.RemoveRowByIndex(m.cursor)
+}
+
+// RemoveRowByHash removes the row identified by the metadata hash value. If no rows remain, this returns false.
+func (m *Model) RemoveRowByHash(hashCode uint64) bool {
+	ind := m.GetRowByHash(hashCode)
+
+	if ind == -1 {
+		return len(m.rows) > 0
+	}
+
+	return m.RemoveRowByIndex(ind)
+}
+
+// RemoveRow removes the row containing the given object as metadata
+func (m *Model) RemoveRow(obj Metadata) bool {
+	return m.RemoveRowByHash(obj.GetHashCode())
+}
+
+// RemoveRowByIndex removes the row at the given index. If no rows remain, this returns false.
+func (m *Model) RemoveRowByIndex(index int) bool {
+
+	if index > len(m.rows)-1 || index < 0 {
+		return true
+	}
 
 	switch {
 	case len(m.rows) <= 1:
 
 		m.rows = []Row{}
 
-	case m.cursor == 0:
+	case index == 0:
 
 		m.rows = m.rows[1:]
 
-	case m.cursor == len(m.rows)-1:
+	case index == len(m.rows)-1:
 
 		m.rows = m.rows[:len(m.rows)-1]
 
 	default:
 
-		m.rows = removeIndex(m.rows, m.cursor)
+		m.rows = removeIndex(m.rows, index)
 	}
 
 	m.cursor = clamp(m.cursor, 0, len(m.rows)-1)
 	m.RenumberRows()
 	m.UpdateViewport()
-	return m, len(m.rows) > 0
+	return len(m.rows) > 0
 }
 
 // SortOrder defines the sort direction for the SortBy method.
@@ -609,6 +669,25 @@ func (m *Model) RenumberRows() {
 	m.UpdateViewport()
 }
 
+// GetRowByHash returns the index of the row identified by the given hash value.
+// If the row is not found, -1 is returned.
+func (m Model) GetRowByHash(hashCode uint64) int {
+
+	for i, r := range m.rows {
+		if r.Metadata != nil && r.Metadata.GetHashCode() == hashCode {
+			return i
+		}
+	}
+
+	return -1
+}
+
+// GetRow returns the index of the row containing the given object as metadata.
+// If the row is not found, -1 is returned.
+func (m Model) GetRow(obj Metadata) int {
+	return m.GetRowByHash(obj.GetHashCode())
+}
+
 func (m *Model) addRowNumbers() {
 
 	// Insert rowNumberColumn as column 0
@@ -659,4 +738,142 @@ func pad(width int, i interface{}) string {
 
 func removeIndex[T any](s []T, index int) []T {
 	return append(s[:index], s[index+1:]...)
+}
+
+// renderTable builds a table from a slice of struct.
+// The slice elements must be all the same type.
+func renderTable(data interface{}, fields []string) ([]Column, []Row, error) {
+	v := reflect.ValueOf(data)
+	if v.Kind() != reflect.Slice || v.Len() == 0 {
+		return nil, nil, errors.New("invalid or empty data slice")
+	}
+
+	elemType := v.Index(0).Type()
+	if elemType.Kind() != reflect.Struct {
+		return nil, nil, errors.New("data slice must contain structs")
+	}
+
+	// Check if the elements implement the Metadata interface
+	var metadataInterfaceType = reflect.TypeOf((*Metadata)(nil)).Elem()
+	if !elemType.Implements(metadataInterfaceType) {
+		return nil, nil, errors.New("elements in the data slice must implement the Metadata interface")
+	}
+
+	// Recursive function to get all field names and struct tag values, including embedded structs
+	var getFieldNamesWithTags func(reflect.Type) []string
+	getFieldNamesWithTags = func(t reflect.Type) []string {
+		var result []string
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+
+			// Skip unexported fields
+			if !field.IsExported() {
+				continue
+			}
+
+			if field.Anonymous {
+				embeddedFields := getFieldNamesWithTags(field.Type)
+				result = append(result, embeddedFields...)
+			} else {
+				if tag := field.Tag.Get("xtable"); tag != "" {
+					result = append(result, tag) // Use the struct tag's value
+				} else {
+					result = append(result, field.Name)
+				}
+			}
+		}
+		return result
+	}
+
+	// Recursive function to find the field index path (for nested structs)
+	var getFieldIndices func(reflect.Type, string) ([]int, bool)
+	getFieldIndices = func(t reflect.Type, fieldName string) ([]int, bool) {
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+
+			// Skip unexported fields
+			if !field.IsExported() {
+				continue
+			}
+
+			if field.Anonymous {
+				indices, found := getFieldIndices(field.Type, fieldName)
+				if found {
+					return append([]int{i}, indices...), true
+				}
+			} else {
+				if tag := field.Tag.Get("xtable"); tag == fieldName || (tag == "" && field.Name == fieldName) {
+					return []int{i}, true
+				}
+			}
+		}
+		return nil, false
+	}
+
+	// Safely get the value of a nested field
+	getNestedFieldValue := func(v reflect.Value, indices []int) (result reflect.Value) {
+		defer func() {
+			if r := recover(); r != nil {
+				// Ignore unexported or inaccessible fields
+				result = reflect.Value{}
+			}
+		}()
+
+		for _, index := range indices {
+			if v.Kind() == reflect.Ptr && !v.IsNil() {
+				v = v.Elem() // Dereference pointer
+			}
+			v = v.Field(index)
+		}
+		return v
+	}
+
+	// Get all struct field names if fields are not provided
+	if len(fields) == 0 {
+		fields = getFieldNamesWithTags(elemType)
+	}
+
+	// Prepare columns and find field indices
+	columns := make([]Column, len(fields))
+	fieldIndices := make([][]int, len(fields))
+	for i, field := range fields {
+		indices, found := getFieldIndices(elemType, field)
+		if !found {
+			return nil, nil, fmt.Errorf("field %s not found in struct", field)
+		}
+		fieldIndices[i] = indices
+
+		// Determine column title
+		fieldStruct := elemType.FieldByIndex(indices)
+		columnTitle := fieldStruct.Name
+		if tag := fieldStruct.Tag.Get("xtable"); tag != "" {
+			columnTitle = tag
+		}
+
+		columns[i] = Column{Title: columnTitle, Width: len(columnTitle)}
+	}
+
+	// Prepare rows and determine max width for each column
+	rows := make([]Row, v.Len())
+	for i := 0; i < v.Len(); i++ {
+		elem := v.Index(i)
+
+		rdata := make([]string, len(fields))
+		for j, indices := range fieldIndices {
+			val := getNestedFieldValue(elem, indices)
+			valStr := ""
+			if val.IsValid() {
+				valStr = fmt.Sprintf("%v", val.Interface())
+			}
+			rdata[j] = valStr
+			if len(valStr) > columns[j].Width {
+				columns[j].Width = len(valStr)
+			}
+		}
+
+		x := elem.Interface().(Metadata) // Assert metadata interface
+		rows[i] = Row{Data: rdata, Metadata: x}
+	}
+
+	return columns, rows, nil
 }

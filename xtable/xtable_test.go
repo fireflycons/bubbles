@@ -1,8 +1,12 @@
 package xtable
 
 import (
+	"hash/fnv"
 	"os"
+	"runtime"
+	"strconv"
 	"testing"
+	"unsafe"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -124,7 +128,7 @@ func TestRenderRow(t *testing.T) {
 func TestTableAlignment(t *testing.T) {
 	// Some issue with golden tests and EOL characters on Windows.
 	// Oddly works locally on Windows, but not in GH actions
-	skipIfGithub(t)
+	skipIfGithubOnWindows(t)
 
 	t.Run("No border", func(t *testing.T) {
 		biscuits := New(
@@ -548,8 +552,231 @@ func TestFind(t *testing.T) {
 	}
 }
 
-func skipIfGithub(t *testing.T) {
-	if _, github := os.LookupEnv("GITHUB_ACTION"); github {
+type rowData struct {
+	Name       string
+	PacketSize int
+	hash       uint64
+}
+
+func (r rowData) GetHashCode() uint64 {
+	return r.hash
+}
+
+func intToBytes(i int) []byte {
+	// Determine the size of the int type
+	size := unsafe.Sizeof(i)
+
+	// Create a slice of bytes referencing the memory of the integer
+	return unsafe.Slice((*byte)(unsafe.Pointer(&i)), size)
+}
+
+func newRowData(s string, i int) rowData {
+	// Precompute hash for speed
+	hasher := fnv.New64a()
+	hasher.Write([]byte(s))
+	hasher.Write(intToBytes(i))
+	hashVal := hasher.Sum64()
+
+	return rowData{
+		Name:       s,
+		PacketSize: i,
+		hash:       hashVal,
+	}
+}
+
+func TestGetRowByHash(t *testing.T) {
+	biscuits := New(
+		WithHeight(5),
+		WithColumns([]Column{
+			{Title: "Name", Width: 25},
+			{Title: "PacketSize", Width: 4},
+		}),
+		WithRows([]Row{
+			{
+				Data:     []string{"Chocolate Digestives", "12"},
+				Metadata: newRowData("Chocolate Digestives", 12),
+			},
+			{
+				Data:     []string{"Tim Tams", "8"},
+				Metadata: newRowData("Tim Tams", 8),
+			},
+			{
+				Data:     []string{"Hobnobs", "10"},
+				Metadata: newRowData("Hobnobs", 10),
+			},
+			{
+				Data:     []string{"Peanut Butter Cookie", "8"},
+				Metadata: newRowData("Peanut Butter Cookie", 8),
+			},
+		}),
+	)
+
+	tests := []struct {
+		row  int
+		hash uint64
+	}{
+		{
+			row:  0,
+			hash: 0x40099b03ee546818,
+		},
+		{
+			row:  1,
+			hash: 0x73c93c25d05d3b20,
+		},
+		{
+			row:  2,
+			hash: 0x328fbeb31d4437e0,
+		},
+		{
+			row:  3,
+			hash: 0xca7bd7aa9e6497d4,
+		},
+		{
+			row:  -1,
+			hash: 0,
+		},
+	}
+
+	for _, test := range tests {
+		require.Equal(t, test.row, biscuits.GetRowByHash(test.hash))
+	}
+}
+
+func TestWithStructData(t *testing.T) {
+
+	data := []rowData{
+		newRowData("Chocolate Digestives", 12),
+		newRowData("Tim Tams", 8),
+		newRowData("Hobnobs", 10),
+		newRowData("Peanut Butter Cookie", 8),
+	}
+
+	table := New(WithStructData(data))
+
+	require.Equal(t, 2, len(table.cols))
+	require.Equal(t, 4, len(table.rows))
+	require.Equal(t, "Name", table.cols[0].Title)
+	require.Equal(t, "PacketSize", table.cols[1].Title)
+
+	for i, r := range data {
+		require.Equal(t, r.Name, table.rows[i].Data[0])
+		require.Equal(t, strconv.Itoa(r.PacketSize), table.rows[i].Data[1])
+	}
+}
+
+type taggedRowData struct {
+	Name       string `xtable:"Biscuit"`
+	PacketSize int
+	hash       uint64
+}
+
+func (r taggedRowData) GetHashCode() uint64 {
+	return r.hash
+}
+
+func newTaggedRowData(s string, i int) taggedRowData {
+	// Precompute hash for speed
+	hasher := fnv.New64a()
+	hasher.Write([]byte(s))
+	hasher.Write(intToBytes(i))
+	hashVal := hasher.Sum64()
+
+	return taggedRowData{
+		Name:       s,
+		PacketSize: i,
+		hash:       hashVal,
+	}
+}
+
+func TestWithTaggedStructData(t *testing.T) {
+
+	data := []taggedRowData{
+		newTaggedRowData("Chocolate Digestives", 12),
+		newTaggedRowData("Tim Tams", 8),
+		newTaggedRowData("Hobnobs", 10),
+		newTaggedRowData("Peanut Butter Cookie", 8),
+	}
+
+	table := New(WithStructData(data))
+
+	require.Equal(t, 2, len(table.cols))
+	require.Equal(t, 4, len(table.rows))
+	require.Equal(t, "Biscuit", table.cols[0].Title)
+	require.Equal(t, "PacketSize", table.cols[1].Title)
+
+	for i, r := range data {
+		require.Equal(t, r.Name, table.rows[i].Data[0])
+		require.Equal(t, strconv.Itoa(r.PacketSize), table.rows[i].Data[1])
+	}
+}
+
+func TestRemoveRowsByIndex(t *testing.T) {
+	data := []rowData{
+		newRowData("Chocolate Digestives", 12),
+		newRowData("Tim Tams", 8),
+		newRowData("Hobnobs", 10),
+		newRowData("Peanut Butter Cookie", 8),
+	}
+
+	table := New(WithStructData(data))
+
+	require.True(t, table.RemoveRowByIndex(10))
+	require.Equal(t, 4, len(table.rows))
+
+	require.True(t, table.RemoveRowByIndex(0))
+	require.Equal(t, 3, len(table.rows))
+	require.Equal(t, "Tim Tams", table.rows[0].Data[0])
+}
+
+func TestRemoveSelectedRow(t *testing.T) {
+	data := []rowData{
+		newRowData("Chocolate Digestives", 12),
+		newRowData("Tim Tams", 8),
+		newRowData("Hobnobs", 10),
+		newRowData("Peanut Butter Cookie", 8),
+	}
+
+	table := New(WithStructData(data))
+	table.SetCursor(3)
+	require.True(t, table.RemoveSelectedRow())
+	require.Equal(t, 3, len(table.rows))
+
+	// Cursor now on last remaining row
+	require.Equal(t, 2, table.Cursor())
+}
+
+func TestRemoveRowByHash(t *testing.T) {
+	data := []rowData{
+		newRowData("Chocolate Digestives", 12),
+		newRowData("Tim Tams", 8),
+		newRowData("Hobnobs", 10),
+		newRowData("Peanut Butter Cookie", 8),
+	}
+
+	table := New(WithStructData(data))
+	table.SetCursor(3)
+	require.True(t, table.RemoveRowByHash(0x40099b03ee546818))
+	require.Equal(t, 3, len(table.rows))
+	require.Equal(t, "Tim Tams", table.rows[0].Data[0])
+}
+func TestRemoveRow(t *testing.T) {
+	chocolateDigestives := newRowData("Chocolate Digestives", 12)
+	data := []rowData{
+		chocolateDigestives,
+		newRowData("Tim Tams", 8),
+		newRowData("Hobnobs", 10),
+		newRowData("Peanut Butter Cookie", 8),
+	}
+
+	table := New(WithStructData(data))
+	table.SetCursor(3)
+	require.True(t, table.RemoveRow(chocolateDigestives))
+	require.Equal(t, 3, len(table.rows))
+	require.Equal(t, "Tim Tams", table.rows[0].Data[0])
+}
+
+func skipIfGithubOnWindows(t *testing.T) {
+	if _, github := os.LookupEnv("GITHUB_ACTION"); github && runtime.GOOS == "windows" {
 		t.Skip("Skipping for github incompatibility")
 	}
 }
