@@ -206,7 +206,7 @@ func WithRows(rows []Row) Option {
 func WithStructData(data interface{}, fields ...string) Option {
 	return func(m *Model) {
 		if c, r, err := renderTable(data, fields); err != nil {
-			panic(fmt.Sprintf("Canmot render table: %s", err.Error()))
+			panic(fmt.Sprintf("Cannot render table: %s", err.Error()))
 		} else {
 			m.cols = c
 			m.rows = r
