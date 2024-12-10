@@ -83,10 +83,6 @@ func (b Button) keyBinding() key.Binding {
 	binding := key.NewBinding(key.WithKeys(func() []string {
 		keys := []string{strings.ToLower(highlight)}
 
-		if b&(MB_OK|MB_YES) != 0 {
-			keys = append(keys, "enter")
-		}
-
 		if b&(MB_CANCEL|MB_NO) != 0 {
 			keys = append(keys, "esc")
 		}
@@ -239,13 +235,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch msg.Type {
 
-		case tea.KeyCtrlI:
+		case tea.KeyCtrlI, tea.KeyRight:
 
 			// Forward tab between buttons
 			m.box.selectedButton = (m.box.selectedButton + 1) % len(m.box.buttons)
 			return m, nil
 
-		case tea.KeyShiftTab:
+		case tea.KeyShiftTab, tea.KeyLeft:
 
 			// Reverse tab between buttons
 			m.box.selectedButton = (len(m.box.buttons) + m.box.selectedButton - 1) % len(m.box.buttons)
