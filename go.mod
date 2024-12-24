@@ -1,8 +1,8 @@
 module github.com/fireflycons/bubbles
 
-go 1.22
+go 1.18
 
-toolchain go1.22.9
+//toolchain go1.22.9
 
 require (
 	github.com/charmbracelet/bubbles v0.20.0

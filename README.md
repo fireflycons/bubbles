@@ -19,7 +19,7 @@ A port of [table](https://github.com/charmbracelet/bubbles/tree/master#table) wi
     * By object - passing a value that implements the Metadata interface
 * Method to find the vertical offset of the selected row from the top of the visible rows in the table.
 
-## Messagebox
+## messagebox
 
 A simple message box overlay.
 
